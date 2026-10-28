@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ordering System</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1c1f24; --muted: #6b7280;
+    --line: #e3e6ea; --accent: #2563eb; --accent-text: #ffffff;
+    --ok: #15803d; --ok-bg: #dcfce7; --err: #b91c1c; --err-bg: #fee2e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111315; --card: #1a1d21; --text: #eceef1; --muted: #9aa1ab;
+      --line: #2a2f36; --accent: #3b82f6; --accent-text: #ffffff;
+      --ok: #4ade80; --ok-bg: #12301f; --err: #f87171; --err-bg: #3a1618;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); line-height: 1.5; }
+  header { padding: 20px 16px 8px; max-width: 960px; margin: 0 auto; }
+  header h1 { margin: 0; font-size: 1.4rem; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: .9rem; }
+  main { max-width: 960px; margin: 0 auto; padding: 8px 16px 40px;
+         display: grid; gap: 16px; grid-template-columns: 1fr; }
+  @media (min-width: 800px) { main { grid-template-columns: 3fr 2fr; align-items: start; } }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  h2 { margin: 0 0 12px; font-size: 1.05rem; }
+  .menu-item { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+               padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .menu-item:last-child { border-bottom: 0; }
+  .menu-name { font-weight: 600; }
+  .menu-meta { color: var(--muted); font-size: .85rem; }
+  .stepper { display: flex; align-items: center; gap: 8px; }
+  .stepper button { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line);
+                    background: var(--card); color: var(--text); font-size: 1.1rem; cursor: pointer; }
+  .stepper button:disabled { opacity: .4; cursor: not-allowed; }
+  .stepper span { min-width: 24px; text-align: center; font-variant-numeric: tabular-nums; }
+  label { display: block; font-size: .85rem; color: var(--muted); margin: 10px 0 4px; }
+  input, select { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--line);
+                  background: var(--bg); color: var(--text); font-size: .95rem; }
+  .total { display: flex; justify-content: space-between; font-weight: 700; margin: 14px 0 4px; }
+  .btn { width: 100%; margin-top: 10px; padding: 11px; border: 0; border-radius: 8px; cursor: pointer;
+         background: var(--accent); color: var(--accent-text); font-size: 1rem; font-weight: 600; }
+  .btn.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .hint { font-size: .8rem; color: var(--muted); margin-top: 4px; }
+  .notice { margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: .9rem; }
+  .notice.ok { background: var(--ok-bg); color: var(--ok); }
+  .notice.err { background: var(--err-bg); color: var(--err); }
+  .notice dl { margin: 8px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; color: var(--text); }
+  .notice dt { color: var(--muted); }
+  .notice dd { margin: 0; word-break: break-all; }
+  .empty { color: var(--muted); font-size: .9rem; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ordering System</h1>
+  <p>Pilih menu, isi data pembayaran, lalu checkout. Request pertama bisa lambat (cold start).</p>
+</header>
+
+<main>
+  <section>
+    <h2>Daftar Menu</h2>
+    <div id="menuList"><p class="empty">Memuat menu…</p></div>
+  </section>
+
+  <section>
+    <h2>Checkout</h2>
+
+    <label for="idPelanggan">ID Pelanggan</label>
+    <input id="idPelanggan" value="CUST-001" autocomplete="off">
+
+    <label for="metode">Metode pembayaran</label>
+    <select id="metode">
+      <option value="CREDIT_CARD">CREDIT_CARD</option>
+      <option value="DEBIT_CARD">DEBIT_CARD</option>
+    </select>
+
+    <label for="token">Token kartu</label>
+    <input id="token" value="tok_visa_valid_999" autocomplete="off">
+    <div class="hint">Isi <code>invalid_card</code> untuk mensimulasikan pembayaran ditolak.</div>
+
+    <div class="total"><span>Total</span><span id="total">Rp 0</span></div>
+    <div class="hint" id="cartHint">Keranjang masih kosong.</div>
+
+    <button class="btn" id="btnCheckout" disabled>Checkout &amp; Bayar</button>
+    <div id="result"></div>
+
+    <div id="cancelBox" class="hidden">
+      <button class="btn secondary" id="btnCancel">Batalkan pesanan ini</button>
+    </div>
+  </section>
+</main>
+
+<script>
+  var API = "/api/v1";
+  var menu = [];            // data menu dari server
+  var qty = {};             // idMenu -> jumlah di keranjang
+  var lastOrderId = null;
+
+  var rupiah = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
+
+  function el(tag, props, children) {
+    var e = document.createElement(tag);
+    Object.keys(props || {}).forEach(function (k) {
+      if (k === "text") e.textContent = props[k]; else if (k === "class") e.className = props[k]; else e[k] = props[k];
+    });
+    (children || []).forEach(function (c) { e.appendChild(c); });
+    return e;
+  }
+
+  async function callApi(path, options) {
+    var res = await fetch(API + path, options);
+    var body = null;
+    try { body = await res.json(); } catch (e) { /* bukan JSON */ }
+    return { ok: res.ok, status: res.status, body: body };
+  }
+
+  async function loadMenu() {
+    var box = document.getElementById("menuList");
+    try {
+      var r = await callApi("/menu");
+      if (!r.ok) throw new Error("Status " + r.status);
+      menu = r.body;
+      renderMenu();
+    } catch (e) {
+      box.replaceChildren(el("p", { class: "empty", text: "Gagal memuat menu: " + e.message }));
+    }
+  }
+
+  function renderMenu() {
+    var box = document.getElementById("menuList");
+    if (!menu.length) {
+      box.replaceChildren(el("p", { class: "empty", text: "Belum ada menu. Jalankan seed.sql di database." }));
+      return;
+    }
+    var rows = menu.map(function (m) {
+      var n = qty[m.idMenu] || 0;
+      var minus = el("button", { text: "−", disabled: n === 0, title: "Kurangi" });
+      var plus = el("button", { text: "+", disabled: n >= m.stok, title: "Tambah" });
+      minus.onclick = function () { qty[m.idMenu] = Math.max(0, n - 1); renderMenu(); updateCart(); };
+      plus.onclick = function () { qty[m.idMenu] = Math.min(m.stok, n + 1); renderMenu(); updateCart(); };
+      return el("div", { class: "menu-item" }, [
+        el("div", {}, [
+          el("div", { class: "menu-name", text: m.namaMenu }),
+          el("div", { class: "menu-meta", text: rupiah.format(m.harga) + " · stok " + m.stok })
+        ]),
+        el("div", { class: "stepper" }, [minus, el("span", { text: String(n) }), plus])
+      ]);
+    });
+    box.replaceChildren.apply(box, rows);
+  }
+
+  function cartItems() {
+    return menu.filter(function (m) { return (qty[m.idMenu] || 0) > 0; })
+               .map(function (m) { return { idMenu: m.idMenu, jumlah: qty[m.idMenu], harga: m.harga }; });
+  }
+
+  function updateCart() {
+    var items = cartItems();
+    var total = items.reduce(function (s, i) { return s + i.harga * i.jumlah; }, 0);
+    document.getElementById("total").textContent = rupiah.format(total);
+    document.getElementById("cartHint").textContent = items.length
+      ? items.length + " jenis menu dipilih." : "Keranjang masih kosong.";
+    document.getElementById("btnCheckout").disabled = items.length === 0;
+  }
+
+  function showNotice(kind, title, data) {
+    var box = document.getElementById("result");
+    var n = el("div", { class: "notice " + kind }, [el("strong", { text: title })]);
+    if (data) {
+      var dl = el("dl");
+      Object.keys(data).forEach(function (k) {
+        dl.appendChild(el("dt", { text: k }));
+        dl.appendChild(el("dd", { text: String(data[k]) }));
+      });
+      n.appendChild(dl);
+    }
+    box.replaceChildren(n);
+  }
+
+  document.getElementById("btnCheckout").onclick = async function () {
+    var btn = this;
+    var items = cartItems();
+    if (!items.length) return;
+    btn.disabled = true; btn.textContent = "Memproses…";
+    try {
+      var payload = {
+        idPelanggan: document.getElementById("idPelanggan").value.trim(),
+        metodePembayaran: document.getElementById("metode").value,
+        tokenKartu: document.getElementById("token").value.trim(),
+        keranjangData: items.map(function (i) { return { idMenu: i.idMenu, jumlah: i.jumlah }; })
+      };
+      var r = await callApi("/checkout", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+      });
+      if (r.ok && r.body && r.body.success) {
+        var d = r.body.data;
+        lastOrderId = d.idPesanan;
+        showNotice("ok", "Checkout berhasil", {
+          "ID Pesanan": d.idPesanan, "Total": rupiah.format(d.totalBiaya),
+          "Status": d.statusPesanan, "Pembayaran": d.statusPembayaran, "Referensi": d.kodeReferensi
+        });
+        document.getElementById("cancelBox").classList.remove("hidden");
+        qty = {};
+        await loadMenu();
+      } else {
+        var msg = (r.body && r.body.message) || ("Terjadi kesalahan (status " + r.status + ")");
+        var errs = r.body && r.body.errors;
+        showNotice("err", msg, errs && typeof errs === "object" ? errs : null);
+      }
+    } catch (e) {
+      showNotice("err", "Tidak bisa menghubungi server: " + e.message);
+    } finally {
+      btn.textContent = "Checkout & Bayar";
+      updateCart();
+    }
+  };
+
+  document.getElementById("btnCancel").onclick = async function () {
+    if (!lastOrderId) return;
+    var alasan = prompt("Alasan pembatalan:", "Pelanggan ingin mengganti menu pesanan");
+    if (!alasan) return;
+    var r = await callApi("/checkout/" + encodeURIComponent(lastOrderId) + "/batal", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alasan: alasan })
+    });
+    if (r.ok) {
+      showNotice("ok", "Pesanan " + lastOrderId + " dibatalkan. Stok dikembalikan.");
+      document.getElementById("cancelBox").classList.add("hidden");
+      lastOrderId = null;
+      loadMenu();
+    } else {
+      showNotice("err", (r.body && r.body.message) || ("Gagal membatalkan (status " + r.status + ")"));
+    }
+  };
+
+  loadMenu();
+  updateCart();
+</script>
+</body>
+</html>
