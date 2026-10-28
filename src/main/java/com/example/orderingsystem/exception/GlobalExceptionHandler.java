@@ -7,6 +7,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -33,7 +34,10 @@ public class GlobalExceptionHandler {
         });
         return new ResponseEntity<>(ApiResponse.error("Validasi input gagal", errors), HttpStatus.BAD_REQUEST);
     }
-
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException ex) {
+        return new ResponseEntity<>(ApiResponse.error("Endpoint tidak ditemukan", null), HttpStatus.NOT_FOUND);
+    }
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGeneral(Exception ex) {
         return new ResponseEntity<>(ApiResponse.error("Internal Server Error: " + ex.getMessage(), null), HttpStatus.INTERNAL_SERVER_ERROR);
